@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User model supporting RBAC: CUSTOMER | DEALER | MANAGER | ADMIN
+model User {
+  id             String        @id @default(cuid())
+  name           String
+  email          String        @unique
+  role           String        @default("CUSTOMER") // CUSTOMER | DEALER | MANAGER | ADMIN
+  region         String?       // NORTH | SOUTH | EAST | WEST (for Regional Managers or Dealers)
+  outletId       String?       // Primary outlet association for dealer / staff
+  outlet         Outlet?       @relation("OutletStaff", fields: [outletId], references: [id])
+  dealerOutlets  Outlet[]      @relation("OutletDealer")
+  complaints     Complaint[]   @relation("UserComplaints")
+  chatMessages   ChatMessage[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// Retail & Distribution Outlet Model
+model Outlet {
+  id          String      @id @default(cuid())
+  code        String      @unique // e.g. HP-DEL-001, HP-MUM-002
+  name        String
+  region      String      // NORTH | SOUTH | EAST | WEST
+  city        String
+  type        String      // PETROL | DIESEL | LPG | EV | COMBINED
+  dealerId    String?
+  dealer      User?       @relation("OutletDealer", fields: [dealerId], references: [id])
+  staff       User[]      @relation("OutletStaff")
+  complaints  Complaint[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+// Ingested Knowledge Base Documentation (for RAG)
+model KnowledgeDoc {
+  id        String          @id @default(cuid())
+  title     String          @unique
+  category  String
+  content   String
+  source    String
+  language  String          @default("en") // en | hi
+  chunks    DocumentChunk[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+// Document Chunks with Embedding Vectors (JSON format for SQLite & Postgres portability)
+model DocumentChunk {
+  id         String       @id @default(cuid())
+  docId      String
+  doc        KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  chunkText  String
+  embedding  String?      // JSON serialized float array [0.012, -0.045, ...]
+  chunkIndex Int
+  createdAt  DateTime     @default(now())
+
+  @@index([docId])
+}
+
+// Complaints with Smart Triage Fields
+model Complaint {
+  id              String    @id @default(cuid())
+  title           String
+  description     String
+  category        String
+  subcategory     String
+  priority        String    // CRITICAL | HIGH | MEDIUM | LOW
+  status          String    @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED
+  outletId        String?
+  outlet          Outlet?   @relation(fields: [outletId], references: [id])
+  reporterId      String?
+  reporter        User?     @relation("UserComplaints", fields: [reporterId], references: [id])
+  assignedDept    String
+  slaHours        Int
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+  source          String    @default("PORTAL") // CHAT | FORM | PHONE
+  rationale       String?   // AI or rule-based triage explanation
+  suggestedAction String?   // Suggested operational response
+}
+
+// Copilot Chat History & Interaction Logs
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  role      String   // USER | ASSISTANT
+  content   String
+  citations String?  // JSON stringified array of citations [{ docTitle, section, score }]
+  intent    String?  // HPCL_POLICY_RAG | COMPLAINT_ACTION | OUTLET_ANALYTICS | GENERAL | OUT_OF_SCOPE
+  createdAt DateTime @default(now())
+}
